@@ -1,5 +1,5 @@
 
-# Platigo (Platypus Golang Utility)
+# Platigo (Platypus Utility Golang)
 
 Platigo is a Go utility package that provides functionality for connecting to OpenSearch, an open-source search and analytics engine. It offers a convenient way to interact with OpenSearch clusters and perform various operations such as indexing documents, creating indices, updating mappings, and executing search queries.
 

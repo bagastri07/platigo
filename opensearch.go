@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/bagastri07/platigo/utils"
 	"github.com/goccy/go-json"
 	"github.com/opensearch-project/opensearch-go"
 	"github.com/opensearch-project/opensearch-go/opensearchapi"
+	"github.com/opensearch-project/opensearch-go/opensearchutil"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,7 +25,7 @@ type IndexModel interface {
 	GetID() string
 }
 
-type OpensearchClient interface {
+type OpenSearchClient interface {
 	// Index indexes a document in OpenSearch.
 	Index(ctx context.Context, indexName string, model IndexModel) (*opensearchapi.Response, error)
 
@@ -35,14 +37,17 @@ type OpensearchClient interface {
 
 	// Search performs a search query in OpenSearch.
 	Search(ctx context.Context, indexNames []string, body *strings.Reader) (*opensearchapi.Response, error)
+
+	// BulkIndex indexes multiple documents in OpenSearch.
+	BulkIndex(ctx context.Context, indexName string, models []IndexModel) error
 }
 
-type opensearchClient struct {
+type openSearchClient struct {
 	client *opensearch.Client
 }
 
-// NewOpensearchClient creates a new OpensearchClient instance.
-func NewOpensearchClient(config *OSConfig) (OpensearchClient, error) {
+// NewOpenSearchClient creates a new OpenSearchClient instance.
+func NewOpenSearchClient(config *OSConfig) (OpenSearchClient, error) {
 	client, err := opensearch.NewClient(opensearch.Config{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: config.InsecureSkipVerify}, // #nosec G402
@@ -51,14 +56,14 @@ func NewOpensearchClient(config *OSConfig) (OpensearchClient, error) {
 		Username:  config.Username,
 		Password:  config.Password,
 	})
-	platigoOSClient := &opensearchClient{
+	platigoOSClient := &openSearchClient{
 		client: client,
 	}
 
 	return platigoOSClient, err
 }
 
-func (k *opensearchClient) CreateIndices(ctx context.Context, indexName string, body *strings.Reader) (*opensearchapi.Response, error) {
+func (k *openSearchClient) CreateIndices(ctx context.Context, indexName string, body *strings.Reader) (*opensearchapi.Response, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"indexName": indexName,
 	})
@@ -78,7 +83,7 @@ func (k *opensearchClient) CreateIndices(ctx context.Context, indexName string, 
 	return res, err
 }
 
-func (k *opensearchClient) PutIndicesMapping(ctx context.Context, indexNames []string, body *strings.Reader) (*opensearchapi.Response, error) {
+func (k *openSearchClient) PutIndicesMapping(ctx context.Context, indexNames []string, body *strings.Reader) (*opensearchapi.Response, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"indexNames": indexNames,
 	})
@@ -100,7 +105,7 @@ func (k *opensearchClient) PutIndicesMapping(ctx context.Context, indexNames []s
 
 }
 
-func (k *opensearchClient) Index(ctx context.Context, indexName string, model IndexModel) (*opensearchapi.Response, error) {
+func (k *openSearchClient) Index(ctx context.Context, indexName string, model IndexModel) (*opensearchapi.Response, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"indexName": indexName,
 		"docID":     model.GetID(),
@@ -132,7 +137,7 @@ func (k *opensearchClient) Index(ctx context.Context, indexName string, model In
 	return res, nil
 }
 
-func (k *opensearchClient) Search(ctx context.Context, indexNames []string, body *strings.Reader) (*opensearchapi.Response, error) {
+func (k *openSearchClient) Search(ctx context.Context, indexNames []string, body *strings.Reader) (*opensearchapi.Response, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"indexNames": indexNames,
 	})
@@ -152,4 +157,53 @@ func (k *opensearchClient) Search(ctx context.Context, indexNames []string, body
 	logger.Info(res)
 
 	return res, nil
+}
+
+func (k *openSearchClient) BulkIndex(ctx context.Context, indexName string, models []IndexModel) error {
+	logger := logrus.WithFields(logrus.Fields{
+		"indexName": indexName,
+	})
+
+	bulkIndexer, err := opensearchutil.NewBulkIndexer(opensearchutil.BulkIndexerConfig{
+		Index:      indexName,
+		Client:     k.client,
+		NumWorkers: 10,
+	})
+
+	if err != nil {
+		logger.Errorf("Failed to create bulk indexer: %s", err)
+		return err
+	}
+
+	for _, model := range models {
+		docID := model.GetID()
+		jsonData, err := json.Marshal(model)
+		if err != nil {
+			logger.Error(err)
+			continue
+		}
+
+		item := opensearchutil.BulkIndexerItem{
+			Action:     "index",
+			DocumentID: docID,
+			Body:       strings.NewReader(string(jsonData)),
+		}
+
+		err = bulkIndexer.Add(ctx, item)
+		if err != nil {
+			logger.Errorf("Failed to add document ID %s to bulk indexer: %s", docID, err)
+		}
+	}
+
+	err = bulkIndexer.Close(ctx)
+	if err != nil {
+		logger.Errorf("Failed to close bulk indexer: %s", err)
+		return err
+	}
+
+	stat := bulkIndexer.Stats()
+	logger.Info("Bulk Indexer Stat: ", utils.Dump(stat))
+
+	return nil
+
 }

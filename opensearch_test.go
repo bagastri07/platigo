@@ -28,7 +28,7 @@ func TestNewOpensearchClient(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewOpensearchClient(tt.args.config)
+			got, err := NewOpenSearchClient(tt.args.config)
 			assert.NotNil(t, got)
 			assert.NoError(t, err)
 		})
