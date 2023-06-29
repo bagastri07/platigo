@@ -40,6 +40,9 @@ type OpenSearchClient interface {
 
 	// BulkIndex indexes multiple documents in OpenSearch.
 	BulkIndex(ctx context.Context, indexName string, models []IndexModel) error
+
+	// Ping pings the OpenSearch cluster to check its availability.
+	Ping(ctx context.Context) (*opensearchapi.Response, error)
 }
 
 type openSearchClient struct {
@@ -206,4 +209,16 @@ func (k *openSearchClient) BulkIndex(ctx context.Context, indexName string, mode
 
 	return nil
 
+}
+
+func (k *openSearchClient) Ping(ctx context.Context) (*opensearchapi.Response, error) {
+	req := opensearchapi.PingRequest{}
+
+	res, err := req.Do(ctx, k.client)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to ping OpenSearch cluster")
+		return nil, err
+	}
+
+	return res, nil
 }
